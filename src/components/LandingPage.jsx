@@ -1,63 +1,77 @@
 import React from 'react';
 import { Shield, Lock, Clock, Check, ChevronRight, Database, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom'; // Import useNavigate
 
 const LandingPage = () => {
-    return (
-        <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
-            <nav className="bg-white shadow-sm fixed w-full z-10">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between h-16 items-center">
-                        <div className="flex items-center">
-                            <Shield className="h-8 w-8 text-blue-600" />
-                            <span className="ml-2 text-xl font-bold text-gray-900">SecureSure</span>
-                        </div>
-                        <div className="hidden md:flex items-center space-x-8">
-                            <a href="#features" className="text-gray-700 hover:text-blue-600">Features</a>
-                            <a href="#technology" className="text-gray-700 hover:text-blue-600">Technology</a>
-                            <a href="#workflow" className="text-gray-700 hover:text-blue-600">How it Works</a>
-                            <button className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition">
-                                Get Started
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </nav>
+  const navigate = useNavigate(); // Hook for navigation
 
-            <header className="relative overflow-hidden pt-20">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
-                    <motion.div
-                        className="text-center"
-                        initial={{ opacity: 0, y: -50 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.8 }}
-                    >
-                        <h1 className="text-5xl tracking-tight font-extrabold text-gray-900 sm:text-6xl">
-                            <span className="block">Decentralized Smart Insurance</span>
-                            <span className="block text-blue-600">Claim Processing</span>
-                        </h1>
-                        <p className="mt-5 max-w-md mx-auto text-xl text-gray-600 sm:text-2xl md:mt-8 md:max-w-3xl">
-                            Leverage the power of Web3 and Generative AI for transparent, fraud-resistant insurance claims processing.
-                        </p>
-                        <div className="mt-8 flex justify-center">
-                            <motion.a
-                                href="#"
-                                className="inline-flex items-center justify-center px-8 py-3 text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                                whileHover={{ scale: 1.05 }}
-                            >
-                                Get Started
-                            </motion.a>
-                            <motion.a
-                                href="#"
-                                className="ml-4 inline-flex items-center justify-center px-8 py-3 text-base font-medium rounded-md text-blue-600 bg-white border border-blue-600 hover:bg-blue-50"
-                                whileHover={{ scale: 1.05 }}
-                            >
-                                Learn More
-                            </motion.a>
-                        </div>
-                    </motion.div>
-                </div>
-            </header>
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+      <nav className="bg-white shadow-sm fixed w-full z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16 items-center">
+            <div className="flex items-center">
+              <Shield className="h-8 w-8 text-blue-600" />
+              <span className="ml-2 text-xl font-bold text-gray-900">SecureSure</span>
+            </div>
+            <div className="hidden md:flex items-center space-x-8">
+              <a href="#features" className="text-gray-700 hover:text-blue-600">
+                Features
+              </a>
+              <a href="#technology" className="text-gray-700 hover:text-blue-600">
+                Technology
+              </a>
+              <a href="#workflow" className="text-gray-700 hover:text-blue-600">
+                How it Works
+              </a>
+              {/* Update button to use navigation */}
+              <button
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition"
+                onClick={() => navigate('/login')} // Redirect to the login page
+              >
+                Get Started
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <header className="relative overflow-hidden pt-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
+          <motion.div
+            className="text-center"
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            <h1 className="text-5xl tracking-tight font-extrabold text-gray-900 sm:text-6xl">
+              <span className="block">Decentralized Smart Insurance</span>
+              <span className="block text-blue-600">Claim Processing</span>
+            </h1>
+            <p className="mt-5 max-w-md mx-auto text-xl text-gray-600 sm:text-2xl md:mt-8 md:max-w-3xl">
+              Leverage the power of Web3 and Generative AI for transparent, fraud-resistant insurance claims processing.
+            </p>
+            <div className="mt-8 flex justify-center">
+              <motion.a
+                href="#"
+                className="inline-flex items-center justify-center px-8 py-3 text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                whileHover={{ scale: 1.05 }}
+                onClick={() => navigate('/login')} // Redirect to the login page
+              >
+                Get Started
+              </motion.a>
+              <motion.a
+                href="#"
+                className="ml-4 inline-flex items-center justify-center px-8 py-3 text-base font-medium rounded-md text-blue-600 bg-white border border-blue-600 hover:bg-blue-50"
+                whileHover={{ scale: 1.05 }}
+              >
+                Learn More
+              </motion.a>
+            </div>
+          </motion.div>
+        </div>
+      </header>
 
             <section id="features" className="py-16 bg-gray-50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

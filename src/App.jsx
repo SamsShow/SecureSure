@@ -3,8 +3,11 @@ import LandingPage from './components/LandingPage';
 import AdminPage from './components/AdminPage';
 import HospitalDashboard from './components/HospitalDashboard';
 import CompanyDashboard from './components/CompanyDasboard';
+
+import Login from './components/Login'
 import UserDashboard from './components/UserDashboard';
 import ClaimSubmit from './components/ClaimSubmit';
+
 
 const App = () => (
     <Router>
@@ -13,8 +16,10 @@ const App = () => (
             <Route path="/admin" element={<AdminPage />} />
             <Route path='/hospital' element={<HospitalDashboard />} />
             <Route path='/company' element={<CompanyDashboard />} />
+            <Route path='/login' element={<Login />} />
             <Route path='/user' element={<UserDashboard />} />
             <Route path='/claim' element={<ClaimSubmit />} />
+
         </Routes>
     </Router>
 );
