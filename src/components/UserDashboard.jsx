@@ -125,7 +125,14 @@ const UserDashboard = () => {
             pinata_secret_api_key: PINATA_SECRET_KEY,
           },
         }
+        
       );
+        // Store the form submission data
+        const submissionData = {
+            hash: response.data.IpfsHash,
+            timestamp: new Date().toISOString()
+        };
+        localStorage.setItem('formSubmission', JSON.stringify(submissionData));
 
       setNotification({
         type: "success",
