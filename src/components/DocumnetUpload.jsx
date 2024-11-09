@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardHeader, CardTitle, CardContent } from "../elements/Card";
 import {
   Upload,
@@ -7,12 +8,15 @@ import {
   CheckCircle,
   XCircle,
   ExternalLink,
+  FolderUp,
 } from "lucide-react";
 import axios from "axios";
 
 const PINATA_API_URL = "https://api.pinata.cloud/pinning/pinFileToIPFS";
+const PINATA_PIN_BY_JSON_URL = "https://api.pinata.cloud/pinning/pinJsonToIPFS";
 
 const DocumentUpload = () => {
+    const navigate = useNavigate();
   const [files, setFiles] = useState({
     bills: null,
     doctorReports: null,
@@ -34,11 +38,15 @@ const DocumentUpload = () => {
     policyDocuments: null,
   });
 
+  const [directoryHash, setDirectoryHash] = useState(null);
+  const [isCreatingDirectory, setIsCreatingDirectory] = useState(false);
+
   const [errors, setErrors] = useState({
     bills: "",
     doctorReports: "",
     testReports: "",
     policyDocuments: "",
+    directory: "",
   });
 
   const uploadToPinata = async (file, documentType) => {
@@ -51,9 +59,8 @@ const DocumentUpload = () => {
       const formData = new FormData();
       formData.append("file", file);
 
-      // Add metadata
       const metadata = JSON.stringify({
-        name: file.name,
+        name: `${documentType}/${file.name}`,
         keyvalues: {
           type: documentType,
           uploadDate: new Date().toISOString(),
@@ -61,10 +68,9 @@ const DocumentUpload = () => {
       });
       formData.append("pinataMetadata", metadata);
 
-      // Add pinata options
       const pinataOptions = JSON.stringify({
         cidVersion: 1,
-        wrapWithDirectory: false,
+        wrapWithDirectory: true,
       });
       formData.append("pinataOptions", pinataOptions);
 
@@ -74,27 +80,7 @@ const DocumentUpload = () => {
           pinata_api_key: import.meta.env.VITE_PINATA_API_KEY,
           pinata_secret_api_key: import.meta.env.VITE_PINATA_SECRET_KEY,
         },
-        onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round(
-            (progressEvent.loaded * 100) / progressEvent.total
-          );
-          console.log(`Upload progress: ${percentCompleted}%`);
-        },
       });
-      const existingUploads = JSON.parse(
-        localStorage.getItem("documentUploads") || "[]"
-      );
-      const newUpload = {
-        name: file.name,
-        cid: response.data.IpfsHash,
-        timestamp: new Date().toISOString(),
-        size: file.size,
-        ipfsUrl: `https://gateway.pinata.cloud/ipfs/${response.data.IpfsHash}`,
-      };
-      localStorage.setItem(
-        "documentUploads",
-        JSON.stringify([...existingUploads, newUpload])
-      );
 
       const ipfsUrl = `https://gateway.pinata.cloud/ipfs/${response.data.IpfsHash}`;
 
@@ -107,6 +93,8 @@ const DocumentUpload = () => {
           ipfsUrl: ipfsUrl,
         },
       }));
+
+      return response.data.IpfsHash;
     } catch (error) {
       console.error("Upload error:", error);
       setErrors((prev) => ({
@@ -116,16 +104,78 @@ const DocumentUpload = () => {
           error.message ||
           "Failed to upload. Please try again.",
       }));
+      return null;
     } finally {
       setUploading((prev) => ({ ...prev, [documentType]: false }));
     }
   };
 
-  const handleFileChange = (e, documentType) => {
+  const createDirectoryHash = async () => {
+    setIsCreatingDirectory(true);
+    setErrors((prev) => ({ ...prev, directory: "" }));
+
+    try {
+      const documentHashes = {};
+      for (const [type, result] of Object.entries(uploadResults)) {
+        if (result?.cid) {
+          documentHashes[type] = result.cid;
+        }
+      }
+
+      if (Object.keys(documentHashes).length === 0) {
+        throw new Error("No documents have been uploaded yet");
+      }
+
+      const directoryMetadata = {
+        name: "medical-documents",
+        keyvalues: {
+          created: new Date().toISOString(),
+          documentTypes: Object.keys(documentHashes).join(","),
+        },
+      };
+
+      const directoryData = {
+        documents: documentHashes,
+        metadata: {
+          created: new Date().toISOString(),
+          lastModified: new Date().toISOString(),
+        },
+      };
+
+      const response = await axios.post(PINATA_PIN_BY_JSON_URL, directoryData, {
+        headers: {
+          "Content-Type": "application/json",
+          pinata_api_key: import.meta.env.VITE_PINATA_API_KEY,
+          pinata_secret_api_key: import.meta.env.VITE_PINATA_SECRET_KEY,
+        },
+        pinataMetadata: directoryMetadata,
+      });
+
+      setDirectoryHash(response.data.IpfsHash);
+
+      // Store in localStorage
+      const uploadRecord = {
+        directoryHash: response.data.IpfsHash,
+        timestamp: new Date().toISOString(),
+        documents: documentHashes,
+        ipfsUrl: `https://gateway.pinata.cloud/ipfs/${response.data.IpfsHash}`,
+      };
+      localStorage.setItem("documentDirectory", JSON.stringify(uploadRecord));
+    } catch (error) {
+      console.error("Directory creation error:", error);
+      setErrors((prev) => ({
+        ...prev,
+        directory: error.message || "Failed to create directory hash",
+      }));
+    } finally {
+      setIsCreatingDirectory(false);
+    }
+  };
+
+  const handleFileChange = async (e, documentType) => {
     const file = e.target.files[0];
     if (file) {
       if (file.size > 10 * 1024 * 1024) {
-        // 10MB limit
         setErrors((prev) => ({
           ...prev,
           [documentType]: "File size exceeds 10MB limit",
@@ -133,7 +183,7 @@ const DocumentUpload = () => {
         return;
       }
       setFiles((prev) => ({ ...prev, [documentType]: file }));
-      uploadToPinata(file, documentType);
+      await uploadToPinata(file, documentType);
     }
   };
 
@@ -213,6 +263,59 @@ const DocumentUpload = () => {
                 title="Policy Documents"
                 type="policyDocuments"
               />
+
+              <div className="mt-8">
+                <button
+                  onClick={createDirectoryHash}
+                  disabled={
+                    isCreatingDirectory ||
+                    Object.values(uploadResults).every((r) => !r)
+                  }
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {isCreatingDirectory ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <FolderUp className="w-5 h-5" />
+                  )}
+                  Create Directory Hash
+                </button>
+
+                {errors.directory && (
+                  <p className="mt-2 text-sm text-red-500">
+                    {errors.directory}
+                  </p>
+                )}
+
+                {directoryHash && (
+                  <div className="mt-4 p-4 bg-green-50 rounded-md">
+                    <h4 className="text-lg font-medium text-green-800">
+                      Directory Created Successfully!
+                    </h4>
+                    <p className="text-sm text-green-600 mt-2">
+                      Directory Hash: {directoryHash}
+                    </p>
+                    <a
+                      href={`https://gateway.pinata.cloud/ipfs/${directoryHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1 mt-2"
+                    >
+                      View Directory on IPFS{" "}
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
+              <button
+                type="button"
+                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+                onClick={() => navigate("/claim")}
+              >
+                Next
+              </button>
             </div>
           </CardContent>
         </Card>
