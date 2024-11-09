@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "../elements/Card";
 import axios from "axios";
 import { AlertCircle, Upload, CheckCircle } from "lucide-react";
 import Navbar from "./Navbar";
+import Chatbot from '../components/Chatbot';
 
 const UserDashboard = () => {
   const navigate = useNavigate();
@@ -533,6 +534,7 @@ return (
             </Card>
         </div>
     </div>
+    <Chatbot />
     </>
 );
 };
