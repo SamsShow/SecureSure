@@ -1,55 +1,78 @@
 import React, { useState, useEffect } from 'react';
-import { ethers } from 'ethers';
+import PropTypes from 'prop-types';
+import { ethers, BrowserProvider } from 'ethers';
 import { 
   Hospital, 
-  CheckCircle, 
   AlertCircle, 
   Clock, 
   FileCheck,
   Activity,
-  Shield
+  Shield,
+  RefreshCw
 } from 'lucide-react';
+import { Alert, AlertDescription } from '../elements/Alert';
 import contractABI from '../config/abi.json';
 import { contractAddress } from '../config/contractAddress';
 
+const formatAddress = (address) => {
+  return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+};
+
 const HospitalDashboard = ({ userAddress }) => {
   const [contract, setContract] = useState(null);
+  const [connectedAddress, setConnectedAddress] = useState(null);
   const [hospitalInfo, setHospitalInfo] = useState({
+    name: '',
     isActive: false,
     totalVerifications: 0,
     lastVerificationTime: 'Never'
   });
-  const [pendingClaims, setPendingClaims] = useState([]);
-  const [verifiedClaims, setVerifiedClaims] = useState([]);
+  const [claims, setClaims] = useState({
+    pending: [],
+    verified: []
+  });
   const [loading, setLoading] = useState({
     contract: true,
     hospitalData: false,
-    claims: false,
-    verification: false
+    claims: false
   });
   const [error, setError] = useState({
     contract: null,
     hospitalData: null,
-    verification: null
+    claims: null
   });
 
-  // Initialize contract
+  const resetErrors = () => {
+    setError({
+      contract: null,
+      hospitalData: null,
+      claims: null
+    });
+  };
+
+  // Initialize contract and get connected address
   useEffect(() => {
     const initializeContract = async () => {
+      resetErrors();
       try {
-        // Check if window.ethereum is available
         if (!window.ethereum) {
           throw new Error("Please install MetaMask to use this dashboard");
         }
 
-        // Request account access
-        await window.ethereum.request({ method: 'eth_requestAccounts' });
+        const provider = new BrowserProvider(window.ethereum);
+        
+        window.ethereum.on('networkChanged', () => {
+          window.location.reload();
+        });
 
-        // Create Web3Provider
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const signer = provider.getSigner();
+        window.ethereum.on('accountsChanged', (accounts) => {
+          setConnectedAddress(accounts[0] || null);
+        });
 
-        // Create contract instance
+        const accounts = await provider.send('eth_requestAccounts', []);
+        setConnectedAddress(accounts[0]);
+
+        const signer = await provider.getSigner();
         const hospitalContract = new ethers.Contract(
           contractAddress,
           contractABI,
@@ -59,57 +82,54 @@ const HospitalDashboard = ({ userAddress }) => {
         setContract(hospitalContract);
         setLoading(prev => ({ ...prev, contract: false }));
       } catch (err) {
+        console.error('Contract initialization error:', err);
         setError(prev => ({
           ...prev,
-          contract: err.message || "Failed to initialize contract"
+          contract: `Failed to initialize contract: ${err.message}`
         }));
         setLoading(prev => ({ ...prev, contract: false }));
       }
     };
 
     initializeContract();
+
+    return () => {
+      if (window.ethereum) {
+        window.ethereum.removeAllListeners('networkChanged');
+        window.ethereum.removeAllListeners('accountsChanged');
+      }
+    };
   }, []);
 
-  // Listen for network changes
-  useEffect(() => {
-    if (window.ethereum) {
-      window.ethereum.on('chainChanged', () => {
-        window.location.reload();
-      });
-      window.ethereum.on('accountsChanged', () => {
-        window.location.reload();
-      });
-    }
-  }, []);
-
-  // Fetch hospital data and claims when contract is initialized
-  useEffect(() => {
-    if (contract && userAddress) {
-      fetchHospitalData();
-      fetchClaims();
-    }
-  }, [contract, userAddress]);
+  const effectiveAddress = userAddress || connectedAddress;
 
   const fetchHospitalData = async () => {
+    if (!effectiveAddress || !contract) return;
+    
     setLoading(prev => ({ ...prev, hospitalData: true }));
+    resetErrors();
+    
     try {
-      const [isActive, totalVerifications, lastVerificationTime] = await Promise.all([
-        contract.isHospitalActive(userAddress),
-        contract.getHospitalVerifications(userAddress),
-        contract.getLastVerificationTime(userAddress)
-      ]);
+      const hospital = await contract.hospitals(effectiveAddress);
+      const isAuthorized = await contract.authorizedHospitals(effectiveAddress);
+      
+      // Convert BigInt values to numbers safely
+      const lastVerificationTimeBigInt = hospital.lastVerificationTime;
+      const totalVerificationsBigInt = hospital.totalVerifications;
 
       setHospitalInfo({
-        isActive,
-        totalVerifications: totalVerifications.toNumber(),
-        lastVerificationTime: lastVerificationTime.toNumber() === 0 
-          ? 'Never' 
-          : new Date(lastVerificationTime.toNumber() * 1000).toLocaleDateString()
+        name: hospital.name,
+        isActive: hospital.isActive && isAuthorized,
+        totalVerifications: totalVerificationsBigInt.toString(),
+        lastVerificationTime: lastVerificationTimeBigInt.toString() === '0'
+          ? 'Never'
+          : new Date(Number(lastVerificationTimeBigInt) * 1000).toLocaleDateString()
       });
     } catch (err) {
+      console.error('Hospital data fetch error:', err);
       setError(prev => ({
         ...prev,
-        hospitalData: "Failed to fetch hospital data"
+        hospitalData: `Failed to fetch hospital data: ${err.message}`
       }));
     } finally {
       setLoading(prev => ({ ...prev, hospitalData: false }));
@@ -117,94 +137,106 @@ const HospitalDashboard = ({ userAddress }) => {
   };
 
   const fetchClaims = async () => {
+    if (!effectiveAddress || !contract) return;
+    
     setLoading(prev => ({ ...prev, claims: true }));
+    resetErrors();
+    
     try {
-      const [pending, verified] = await Promise.all([
-        contract.getPendingClaimsForHospital(userAddress),
-        contract.getVerifiedClaimsForHospital(userAddress)
-      ]);
+      // Get total claims and iterate through them
+      const totalClaims = await contract.totalClaims();
+      const pendingClaims = [];
+      const verifiedClaims = [];
 
-      setPendingClaims(pending.map(claim => ({
-        id: claim.id.toString(),
-        claimant: claim.claimant,
-        amount: claim.amount.toString(),
-        timestamp: new Date(claim.timestamp.toNumber() * 1000).toLocaleDateString()
-      })));
+      // Convert BigInt to number safely for iteration
+      const totalClaimsNumber = Number(totalClaims);
 
-      setVerifiedClaims(verified.map(claim => ({
-        id: claim.id.toString(),
-        claimant: claim.claimant,
-        amount: claim.amount.toString(),
-        timestamp: new Date(claim.timestamp.toNumber() * 1000).toLocaleDateString()
-      })));
+      for (let i = 0; i < totalClaimsNumber; i++) {
+        const claim = await contract.claims(i);
+        if (claim.assignedHospital === effectiveAddress) {
+          const claimData = {
+            id: claim.claimId.toString(),
+            claimant: claim.claimant,
+            amount: ethers.formatEther(claim.claimAmount.toString()),
+            timestamp: new Date(Number(claim.submissionTime) * 1000).toLocaleDateString()
+          };
+
+          if (!claim.hospitalVerified) {
+            pendingClaims.push(claimData);
+          } else {
+            verifiedClaims.push(claimData);
+          }
+        }
+      }
+
+      setClaims({
+        pending: pendingClaims,
+        verified: verifiedClaims
+      });
     } catch (err) {
+      console.error('Claims fetch error:', err);
       setError(prev => ({
         ...prev,
-        claims: "Failed to fetch claims"
+        claims: `Failed to fetch claims: ${err.message}`
       }));
     } finally {
       setLoading(prev => ({ ...prev, claims: false }));
     }
   };
 
-  const formatEth = (value) => {
-    return ethers.formatEther(value || '0');
-  };
-
-  const formatAddress = (address) => {
-    return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Unknown';
-  };
-
-  const handleVerify = async (claimId) => {
+  const verifyClaimByHospital = async (claimId) => {
+    if (!contract || !effectiveAddress) return;
+    
     setLoading(prev => ({ ...prev, verification: true }));
+    resetErrors();
+    
     try {
       const tx = await contract.verifyClaimByHospital(claimId);
       await tx.wait();
-      
-      // Refresh data after verification
-      await Promise.all([
-        fetchHospitalData(),
-        fetchClaims()
-      ]);
+      await fetchClaims();
     } catch (err) {
+      console.error('Verification error:', err);
       setError(prev => ({
         ...prev,
-        verification: err.message || "Failed to verify claim"
+        claims: `Failed to verify claim: ${err.message}`
       }));
     } finally {
       setLoading(prev => ({ ...prev, verification: false }));
     }
   };
 
-  // Show loading state while contract initializes
-  if (loading.contract) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-4">
-        <Clock className="w-8 h-8 animate-spin text-blue-500" />
-        <p className="text-gray-600">Initializing dashboard...</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (contract && effectiveAddress) {
+      fetchHospitalData();
+      fetchClaims();
+    }
+  }, [contract, effectiveAddress]);
 
-  // Show error state if contract initialization failed
-  if (error.contract) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-4 flex items-center space-x-2">
-          <AlertCircle className="w-5 h-5 flex-shrink-0" />
-          <p>{error.contract}</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Rest of the component remains the same...
   return (
     <div className="max-w-7xl mx-auto p-4 space-y-6">
+      {/* Header with Refresh Button */}
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">Hospital Dashboard</h2>
+        <button
+          onClick={() => {
+            fetchHospitalData();
+            fetchClaims();
+          }}
+          disabled={loading.hospitalData || loading.claims}
+          className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 mr-2 ${loading.hospitalData || loading.claims ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+
       {/* Hospital Profile Card */}
       <div className="bg-white rounded-lg shadow-md p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">Hospital Dashboard</h2>
+          <div className="flex items-center space-x-2">
+            <Hospital className="w-6 h-6 text-blue-500" />
+            <h3 className="text-xl font-semibold">Hospital Profile</h3>
+          </div>
           <span className={`px-3 py-1 rounded-full text-sm font-medium ${
             hospitalInfo.isActive 
               ? 'bg-green-100 text-green-800' 
@@ -218,27 +250,28 @@ const HospitalDashboard = ({ userAddress }) => {
           <div className="flex items-center space-x-4">
             <Shield className="w-8 h-8 text-blue-500" />
             <div>
-              <p className="text-sm font-medium">Hospital Address</p>
-              <p className="text-xl">{formatAddress(userAddress)}</p>
+              <p className="text-sm font-medium text-gray-500">Hospital Name</p>
+              <p className="text-lg font-medium">{hospitalInfo.name || 'Unknown'}</p>
             </div>
           </div>
           <div className="flex items-center space-x-4">
             <Activity className="w-8 h-8 text-green-500" />
             <div>
-              <p className="text-sm font-medium">Total Verifications</p>
-              <p className="text-xl">{hospitalInfo.totalVerifications}</p>
+              <p className="text-sm font-medium text-gray-500">Total Verifications</p>
+              <p className="text-lg font-medium">{hospitalInfo.totalVerifications}</p>
             </div>
           </div>
           <div className="flex items-center space-x-4">
             <Clock className="w-8 h-8 text-orange-500" />
             <div>
-              <p className="text-sm font-medium">Last Verification</p>
-              <p className="text-sm">{hospitalInfo.lastVerificationTime}</p>
+              <p className="text-sm font-medium text-gray-500">Last Verification</p>
+              <p className="text-lg font-medium">{hospitalInfo.lastVerificationTime}</p>
             </div>
           </div>
         </div>
       </div>
 
+      {/* Claims Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Pending Claims */}
         <div className="bg-white rounded-lg shadow-md p-6">
@@ -246,41 +279,42 @@ const HospitalDashboard = ({ userAddress }) => {
             <AlertCircle className="w-5 h-5 text-orange-500" />
             <h3 className="text-xl font-semibold">Pending Claims</h3>
           </div>
-          <div className="space-y-4">
-            {pendingClaims.map(claim => (
-              <div key={claim.id} className="border rounded-lg p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <p className="font-medium">Claim #{claim.id}</p>
-                    <p className="text-sm text-gray-500">
-                      Claimant: {formatAddress(claim.claimant)}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      Amount: {formatEth(claim.amount)} ETH
-                    </p>
+          {loading.claims ? (
+            <div className="flex justify-center py-8">
+              <Clock className="w-8 h-8 animate-spin text-blue-500" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {claims.pending.length === 0 ? (
+                <p className="text-center text-gray-500 py-8">No pending claims</p>
+              ) : (
+                claims.pending.map(claim => (
+                  <div key={claim.id} className="border rounded-lg p-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium">Claim #{claim.id}</p>
+                        <p className="text-sm text-gray-500">
+                          From: {formatAddress(claim.claimant)}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          Amount: {claim.amount} ETH
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          Date: {claim.timestamp}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => verifyClaimByHospital(claim.id)}
+                        className="px-3 py-1 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                      >
+                        Verify
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => handleVerify(claim.id)}
-                    disabled={loading.verification}
-                    className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
-                  >
-                    {loading.verification ? (
-                      <Clock className="w-4 h-4 animate-spin mr-2" />
-                    ) : (
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                    )}
-                    Verify
-                  </button>
-                </div>
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                  Pending Verification
-                </span>
-              </div>
-            ))}
-            {pendingClaims.length === 0 && (
-              <p className="text-center text-gray-500">No pending claims</p>
-            )}
-          </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
         {/* Verified Claims */}
@@ -289,43 +323,59 @@ const HospitalDashboard = ({ userAddress }) => {
             <FileCheck className="w-5 h-5 text-green-500" />
             <h3 className="text-xl font-semibold">Verified Claims</h3>
           </div>
-          <div className="space-y-4">
-            {verifiedClaims.map(claim => (
-              <div key={claim.id} className="border rounded-lg p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <p className="font-medium">Claim #{claim.id}</p>
-                    <p className="text-sm text-gray-500">
-                      Claimant: {formatAddress(claim.claimant)}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      Amount: {formatEth(claim.amount)} ETH
-                    </p>
+          {loading.claims ? (
+            <div className="flex justify-center py-8">
+              <Clock className="w-8 h-8 animate-spin text-blue-500" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {claims.verified.length === 0 ? (
+                <p className="text-center text-gray-500 py-8">No verified claims</p>
+              ) : (
+                claims.verified.map(claim => (
+                  <div key={claim.id} className="border rounded-lg p-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="font-medium">Claim #{claim.id}</p>
+                        <p className="text-sm text-gray-500">
+                          From: {formatAddress(claim.claimant)}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          Amount: {claim.amount} ETH
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          Date: {claim.timestamp}
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        Verified
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  Verified
-                </span>
-              </div>
-            ))}
-            {verifiedClaims.length === 0 && (
-              <p className="text-center text-gray-500">No verified claims</p>
-            )}
-          </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Error Alerts */}
-      {Object.entries(error).map(([key, message]) => 
-        message && (
-          <div key={key} className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-4 flex items-center space-x-2">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-            <p>{message}</p>
-          </div>
-        )
-      )}
+      <div className="space-y-2">
+        {Object.entries(error).map(([key, message]) => 
+          message && (
+            <Alert key={key} variant="destructive">
+              <AlertCircle className="w-4 h-4" />
+              <AlertDescription>{message}</AlertDescription>
+            </Alert>
+          )
+        )}
+      </div>
     </div>
   );
+};
+
+HospitalDashboard.propTypes = {
+  userAddress: PropTypes.string
 };
 
 export default HospitalDashboard;
