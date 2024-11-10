@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import contractABI from '../config/abi.json';
 import { contractAddress } from '../config/contractAddress';
 import Navbar from './Navbar';
@@ -24,7 +24,8 @@ const ClaimSubmit = () => {
     const [status, setStatus] = useState({
         loading: false,
         error: null,
-        success: false
+        success: false,
+        claimId: null
     });
 
     const connectWallet = async () => {
@@ -47,7 +48,8 @@ const ClaimSubmit = () => {
             setStatus({
                 loading: false,
                 error: error.message || "Failed to connect wallet",
-                success: false
+                success: false,
+                claimId: null
             });
         }
     };
@@ -69,7 +71,7 @@ const ClaimSubmit = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setStatus({ loading: true, error: null, success: false });
+        setStatus({ loading: true, error: null, success: false, claimId: null });
 
         try {
             if (!contract || !account) {
@@ -87,9 +89,22 @@ const ClaimSubmit = () => {
                 formData.aiOracle
             );
 
-            await tx.wait();
+            // Wait for transaction and get receipt
+            const receipt = await tx.wait();
+            
+            // Find the ClaimSubmitted event and get the claim ID
+            const event = receipt.logs
+                .filter((log) => log.topics[0] === contract.interface.getEvent('ClaimSubmitted').topicHash)
+                .map((log) => contract.interface.parseLog({ topics: log.topics, data: log.data }))[0];
 
-            setStatus({ loading: false, error: null, success: true });
+            const claimId = event.args.claimId; // Assuming the event emits a claimId
+
+            setStatus({ 
+                loading: false, 
+                error: null, 
+                success: true, 
+                claimId: claimId.toString()
+            });
 
             setFormData({
                 claimAmount: '',
@@ -104,7 +119,8 @@ const ClaimSubmit = () => {
             setStatus({
                 loading: false,
                 error: error.message || "Transaction failed",
-                success: false
+                success: false,
+                claimId: null
             });
         }
     };
@@ -301,16 +317,24 @@ const ClaimSubmit = () => {
                             </motion.div>
                         )}
 
-                        {status.success && (
+{status.success && (
                             <motion.div
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 className="bg-green-50 border border-green-200 rounded-md p-4"
                             >
-                                <h3 className="text-sm font-medium text-green-800">Success</h3>
-                                <p className="text-sm text-green-700 mt-1">
-                                    Your claim has been successfully submitted!
-                                </p>
+                                <div className="flex items-start">
+                                    <CheckCircle2 className="h-5 w-5 text-green-400 mt-0.5" />
+                                    <div className="ml-3">
+                                        <h3 className="text-sm font-medium text-green-800">Success</h3>
+                                        <p className="text-sm text-green-700 mt-1">
+                                            Your claim has been successfully submitted!
+                                        </p>
+                                        <p className="text-sm font-medium text-green-800 mt-2">
+                                            Claim ID: {status.claimId}
+                                        </p>
+                                    </div>
+                                </div>
                             </motion.div>
                         )}
 
